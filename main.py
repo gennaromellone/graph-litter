@@ -9,23 +9,32 @@ import numpy as np
 import json
 import matplotlib.pyplot as plt
 import time
+import os
 
-
-DETECTION_THRESHOLD = 0.9
+DETECTION_THRESHOLD = 0.75
 HISTOGRAM_SIZE = 10
-from optimization import histogramCSLTP_fast
+MODEL_NAME = "yolov5s"
+VIDEO_NAME = "video1"
+INPUT_FOLDER = "video"
+OUTPUT_FOLDER= "outputs"
+input_path = os.path.join(os.getcwd(), INPUT_FOLDER, VIDEO_NAME + ".mp4")
+output_path = os.path.join(os.getcwd(),OUTPUT_FOLDER, VIDEO_NAME + ".json")
+#from optimization import histogramCSLTP_fast
 
 #model = torch.hub.load('ultralytics/yolov5', 'custom', 'yolov5m-seg.pt')  # load from PyTorch Hub (WARNING: inference not yet supported)
-model = torch.hub.load('ultralytics/yolov5:master', 'yolov5s')  # Scarica il modello YOLOv7
+model = torch.hub.load('ultralytics/yolov5:master', MODEL_NAME)  # Scarica il modello YOLOv7
 
 model.eval()
 
-# Apri il video in input
-video_path = 'video/video2.mp4'
-cap = cv2.VideoCapture(video_path)
 
+
+if not os.path.exists(OUTPUT_FOLDER):
+    os.makedirs(OUTPUT_FOLDER)
+output_name = VIDEO_NAME + ".json"
+
+cap = cv2.VideoCapture(input_path)
 # Apri un video in output per salvare i risultati
-output_path = 'video_output.mp4'
+#output_path = 'video_output.mp4'
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
 #out = cv2.VideoWriter(output_path, fourcc, 20.0, (int(cap.get(3)), int(cap.get(4))))
 objects = []
@@ -98,7 +107,7 @@ while True:
         #cv2.imshow('YOLOv5 Object Detection', output_frame)
     objects.append({
         "frame": str(idx),
-        "detections":obj
+        "detections": obj
     })
     idx += 1
     print("External Time:", time.time()-start)
@@ -110,11 +119,15 @@ while True:
     #out.write(output_frame)
 dictionary = {
     "thresholdScore": DETECTION_THRESHOLD,
-    "frames":objects
+    "model": MODEL_NAME,
+    "input": input_path,
+    "output": output_path,
+    "frames": objects
 }
 json_object = json.dumps(dictionary, indent=2)
-#with open("video2_training_2.json", "w") as outfile:
-#    outfile.write(json_object)
+
+with open(output_path, "w") as outfile:
+    outfile.write(json_object)
 cap.release()
 #out.release()
 cv2.destroyAllWindows()
