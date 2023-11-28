@@ -9,34 +9,23 @@ import numpy as np
 import json
 import matplotlib.pyplot as plt
 import time
-import os
 
+output_video = True
 DETECTION_THRESHOLD = 0.75
 HISTOGRAM_SIZE = 10
-MODEL_NAME = "yolov5s"
-VIDEO_NAME = "video1"
-INPUT_FOLDER = "video"
-OUTPUT_FOLDER= "outputs"
-input_path = os.path.join(os.getcwd(), INPUT_FOLDER, VIDEO_NAME + ".mp4")
-output_path = os.path.join(os.getcwd(),OUTPUT_FOLDER, VIDEO_NAME + ".json")
 #from optimization import histogramCSLTP_fast
 
-#model = torch.hub.load('ultralytics/yolov5', 'custom', 'yolov5m-seg.pt')  # load from PyTorch Hub (WARNING: inference not yet supported)
-model = torch.hub.load('ultralytics/yolov5:master', MODEL_NAME)  # Scarica il modello YOLOv7
-
+model = torch.hub.load('ultralytics/yolov5', 'custom', 'birds_yolox_20cls.pt')
 model.eval()
 
+video_path = 'video/birds_1.mp4'
+cap = cv2.VideoCapture(video_path)
 
+if output_video:
+    output_path = 'video_output.mp4'
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(output_path, fourcc, 20.0, (int(cap.get(3)), int(cap.get(4))))
 
-if not os.path.exists(OUTPUT_FOLDER):
-    os.makedirs(OUTPUT_FOLDER)
-output_name = VIDEO_NAME + ".json"
-
-cap = cv2.VideoCapture(input_path)
-# Apri un video in output per salvare i risultati
-#output_path = 'video_output.mp4'
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
-#out = cv2.VideoWriter(output_path, fourcc, 20.0, (int(cap.get(3)), int(cap.get(4))))
 objects = []
 idx = 0
 while True:
@@ -44,7 +33,7 @@ while True:
     if not ret:
         break
     start = time.time()
-    results = model(frame)  # Esegui l'object detection sul frame
+    results = model(frame) 
 
     # Do prediction
     pred = results.pred[0]
@@ -95,39 +84,32 @@ while True:
 
             obj.append({
                 "class_id": int(class_id),
-                "class": util.classes[int(class_id)],
+                "class": util.bird_classes[int(class_id)],
                 "score": score,
                 "rois": rois
             })
-    results.render()
-    output_frame = results.imgs[0]
+    if output_video:
+        output_frame = results.render()[0]
+        out.write(output_frame)
+
     if obj:
         pass
         # PASS obj TO GRAPH NEURAL NETWORK!!
         #cv2.imshow('YOLOv5 Object Detection', output_frame)
     objects.append({
         "frame": str(idx),
-        "detections": obj
+        "detections":obj
     })
     idx += 1
     print("External Time:", time.time()-start)
-
-    # Esci se viene premuto il tasto 'q'
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
         
-    #out.write(output_frame)
+    
 dictionary = {
     "thresholdScore": DETECTION_THRESHOLD,
-    "model": MODEL_NAME,
-    "input": input_path,
-    "output": output_path,
-    "frames": objects
+    "frames":objects
 }
 json_object = json.dumps(dictionary, indent=2)
-
-with open(output_path, "w") as outfile:
+with open("birds1_training_1.json", "w") as outfile:
     outfile.write(json_object)
 cap.release()
-#out.release()
-cv2.destroyAllWindows()
+out.release()
