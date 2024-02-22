@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ```
 ## Run
 ```sh
-python main.py
+python buildGraphs.py --dataset ../coco-dataset --output graph/ --maxImages 200 --knnParams 3 --histSize 10 --classes 10 --clusters 10 --features standard
 ```
 ## TODO
 - Improve performance of the features extraction (Parallel)

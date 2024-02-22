@@ -8,3 +8,8 @@ matplotlib
 seaborn
 scipy
 scikit-image
+ultralytics
+scikit-learn
+torch_geometric
+timm
+transformers
