@@ -1,5 +1,5 @@
-torch
-torchvision
+torch==1.12.0 
+torchvision==0.13.0
 opencv-python
 pandas
 pyyaml
@@ -13,3 +13,4 @@ scikit-learn
 torch_geometric
 timm
 transformers
+graphviz

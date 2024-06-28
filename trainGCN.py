@@ -17,7 +17,7 @@ from torch_geometric.data import Data
 from torchvision.ops import focal_loss
 
 from utility import utility
-from models.models import GCN_noLayers, GCN_hidden, GCN_graph, GCNModel, GCNModelWithFocalLoss, FocalLoss, GCN_graph2
+from models import models
 from torch_geometric.nn import GCN
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
@@ -28,10 +28,11 @@ import os
 
 '''
 Build GCN from graph dataset saved in folders
-V. 5.1
+V. 6.0
 
 Support for WandDB
 '''
+WANDB = False
 
 # Arguments to run the experiment
 parser = argparse.ArgumentParser()
@@ -74,7 +75,13 @@ parser.add_argument('--batch', type=int, default=1,
                     help='Batch size')
 args = parser.parse_args()
 print(args)
+from torch.nn.utils.rnn import pad_sequence
 
+def collate_fn(batch):
+    elem1 = batch[0]
+    print(len(elem1[0]), len(elem1[1]))
+    print(elem1[1])
+    
 
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -83,7 +90,7 @@ def drawCM(conf_matrix, path, n_classes):
     conf_matrix_percent = conf_matrix / conf_matrix.sum(axis=1, keepdims=True)
 
     # Class labeling
-    class_labels = utility.classes[:n_classes]
+    class_labels = utility.litter_classes_background[:n_classes]
 
     # Set plot size
     plt.figure(figsize=(8, 8))
@@ -100,21 +107,22 @@ def drawCM(conf_matrix, path, n_classes):
     # Export image
     plt.savefig(path)
 
-wandb.login()
+if WANDB:
+    wandb.login()
 
-run = wandb.init(
-    # set the wandb project where this run will be logged
-    project="gcn-litter",
-    
-    # track hyperparameters and run metadata
-    config={
-    "learning_rate": args.lr,
-    "architecture": "GCN",
-    "dataset": "COCO2014",
-    "epochs": args.epochs,
-    "batch_size": args.hidden_units
-    }
-)
+    run = wandb.init(
+        # set the wandb project where this run will be logged
+        project="gcn-litter",
+        
+        # track hyperparameters and run metadata
+        config={
+        "learning_rate": args.lr,
+        "architecture": "GCN",
+        "dataset": "GLITTER2024",
+        "epochs": args.epochs,
+        "batch_size": args.hidden_units
+        }
+    )
 
 #np.random.seed(args.seed)
 torch.manual_seed(args.seed)
@@ -139,10 +147,12 @@ class GraphDataset(Dataset):
             self.root_dir = folder_files + "graphs_test/"
             self.edge_dir = folder_files + "adjacency_test/"
 
-    def __len__(self):
         self.list_graphs = sorted(os.listdir(self.root_dir))
         self.list_edges = sorted(os.listdir(self.edge_dir))
-        return int(len(self.list_graphs))
+
+    def __len__(self):
+        return len(self.list_graphs)
+        
 
     def __getitem__(self,idx):
         graph_file = os.path.join(self.root_dir, self.list_graphs[idx])
@@ -180,8 +190,8 @@ for n_layers in args.n_layers_set:
     acc_test_vec = np.zeros((args.epochs,), )
     
     ''' LOAD MODEL '''
-    #model = GraphClassifier(num_features, args.hidden_units, num_classes).to(device)
-    model = GCN_graph2(num_features, args.hidden_units, num_classes).to(device)
+    model = models.GCN_graph_nodeClassification(num_features, args.hidden_units, num_classes).to(device)
+    #model = models.GCN_graph2(num_features, args.hidden_units, num_classes).to(device)
     #criterion = FocalLoss(gamma=2)    
     
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) #replace lr and weight decay, with arg parser
@@ -195,7 +205,7 @@ for n_layers in args.n_layers_set:
     # Dataset test
     graph_dataset_test = GraphDataset(folder_files=dir_to_dataset,
                                       is_training_set=False)
-    test_dataloader = DataLoader(dataset=graph_dataset_test, batch_size=1, shuffle=False, pin_memory=True)
+    test_dataloader = DataLoader(dataset=graph_dataset_test, batch_size=args.batch, shuffle=False, pin_memory=True)
     
     epochs_without_improvement = 0
     early_stop = False
@@ -215,8 +225,8 @@ for n_layers in args.n_layers_set:
         acc_epoch = 0
         #example of loop to access the features, classes and edges, this should be adpted to the order of the elements saved in the graph files
         # TRAINING SET
+        print("Train", len(train_dataloader))
         for i, (data_train, edges_train) in enumerate(train_dataloader):
-            #print(data_train[1].size(), data_train[2].size())
             optimizer.zero_grad()
             
             edges_train = edges_train.view(2, -1).long()
