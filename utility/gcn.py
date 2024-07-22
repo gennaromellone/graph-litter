@@ -35,7 +35,7 @@ def flatten_rois(frame_dict):
     return np.array(rois)
 
 # Extract a GCN graph from ROIs and their features. Files are adjacency .npz and graphs .pkl for each image
-def createGraph(rois, path_to_construction, isTrain, knn_param, img_number):
+def exportGraph(rois, path_to_construction, isTrain, knn_param, img_number):
     
     # Create folders if not exist
     
@@ -66,3 +66,25 @@ def createGraph(rois, path_to_construction, isTrain, knn_param, img_number):
             with open(filename_graph, 'wb') as f:
                 pickle.dump([rois, features_matrix, labels], f)
                 pass
+
+
+def createGraph(rois, knn_param):
+    
+    # Create folders if not exist
+    
+    features_matrix = flatten_features(rois)
+    if len(features_matrix) < knn_param:
+        print("Skipping this ROI. KNN parameters too high")
+        pass
+    else:
+        labels = flatten_labels(rois)
+        rois = flatten_rois(rois)
+        if np.isnan(features_matrix).any():
+            print("Features matrix has NaN values!")
+        else:
+            # Build a k-nearest neighbors graph using kneighbors_graph
+            A = kneighbors_graph(features_matrix, knn_param, mode='distance', include_self=True)
+            row, col = A.nonzero()
+            features = [rois, features_matrix, labels]
+
+            return features, row, col
