@@ -32,7 +32,7 @@ V. 6.0
 
 Support for WandDB
 '''
-WANDB = False
+WANDB = True
 
 # Arguments to run the experiment
 parser = argparse.ArgumentParser()
@@ -90,7 +90,7 @@ def drawCM(conf_matrix, path, n_classes):
     conf_matrix_percent = conf_matrix / conf_matrix.sum(axis=1, keepdims=True)
 
     # Class labeling
-    class_labels = utility.litter_classes_background[:n_classes]
+    class_labels = utility.classes[:n_classes]
 
     # Set plot size
     plt.figure(figsize=(8, 8))
@@ -191,6 +191,7 @@ for n_layers in args.n_layers_set:
     
     ''' LOAD MODEL '''
     model = models.GCN_graph_nodeClassification(num_features, args.hidden_units, num_classes).to(device)
+    
     #model = models.GCN_graph2(num_features, args.hidden_units, num_classes).to(device)
     #criterion = FocalLoss(gamma=2)    
     
@@ -213,7 +214,9 @@ for n_layers in args.n_layers_set:
     train_true_labels = []
     train_predicted_labels = []
 
-    run.watch(model)
+    if WANDB:
+        run.watch(model)
+
     for epoch in range(0, args.epochs):
         all_true_labels = []
         all_predicted_labels = []
@@ -223,9 +226,10 @@ for n_layers in args.n_layers_set:
         loss_val_epoch = 0
         acc_test_epoch = 0
         acc_epoch = 0
+        val_id = 0
         #example of loop to access the features, classes and edges, this should be adpted to the order of the elements saved in the graph files
         # TRAINING SET
-        print("Train", len(train_dataloader))
+        #print("Train", len(train_dataloader))
         for i, (data_train, edges_train) in enumerate(train_dataloader):
             optimizer.zero_grad()
             
@@ -241,7 +245,7 @@ for n_layers in args.n_layers_set:
             _data_train = _data_train.to(device)
 
             output = model(_data_train)
-            loss = criterion(output, y[0])
+            loss = criterion(output, y)
             loss.backward()
             optimizer.step()
             
@@ -264,18 +268,19 @@ for n_layers in args.n_layers_set:
                 _data_test = Data(x=features.float(), edge_index=edges_test, y=data_test[2])
                 _data_test = _data_test.to(device)
                 output = model(_data_test)
-                loss_val = criterion(output, y[0])
+                loss_val = criterion(output, y)
 
-                predicted_labels = torch.argmax(output, dim=-1).cpu().item()
+                predicted_labels = torch.argmax(output, dim=-1).to(device)
                 
-                loss_val_epoch += loss_val.item()
-                validation_loss = loss_val_epoch / (x + 1)
+                loss_val_epoch += loss_val
+                validation_loss = loss_val_epoch / (val_id + 1)
                 loss_val_vec[epoch] = validation_loss
                 
-                true_labels = y[0].cpu().item()
+                true_labels = y.to(device)
 
-                all_true_labels.append(true_labels)
-                all_predicted_labels.append(predicted_labels)
+                all_true_labels.extend(true_labels.tolist())
+                all_predicted_labels.extend(predicted_labels.tolist())
+                val_id += 1
 
         # EARLY STOPPING            
         # Check if loss is under the default loss
@@ -305,6 +310,7 @@ for n_layers in args.n_layers_set:
                 # Example: Print accuracy
                 #accuracy = accuracy_score(all_true_labels, all_predicted_labels)
                 print(f'Epoch {epoch+1}/{args.epochs}, Loss Train: {loss_train_vec[epoch]}, Loss Val: {loss_val_vec[epoch]}')
+                #print(all_predicted_labels, type(all_predicted_labels))
                 true_lab = torch.tensor(all_true_labels)
                 pred_lab = torch.tensor(all_predicted_labels)
                 accuracy = accuracy_score(true_lab, pred_lab)
@@ -316,13 +322,14 @@ for n_layers in args.n_layers_set:
                 print("Recall:", recall)
                 print("F1 Score:", f1)
 
-                run.log({"train_loss": loss_train_vec[epoch],
-                         "val_loss": loss_val_vec[epoch],
-                         "accuracy": accuracy,
-                         "precision": precision,
-                         "recall": recall,
-                         "f1": f1
-                         })
+                if WANDB:
+                    run.log({"train_loss": loss_train_vec[epoch],
+                            "val_loss": loss_val_vec[epoch],
+                            "accuracy": accuracy,
+                            "precision": precision,
+                            "recall": recall,
+                            "f1": f1
+                            })
 
     
     if not early_stop:
