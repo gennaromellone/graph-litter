@@ -13,42 +13,21 @@ from typing import List, Tuple, Dict, Union, Sequence
 from PIL import Image
 
 class ImageSimilarityModel(object):
-    def __init__(self, ckp_path: str = "google/vit-base-patch16-224", #ImageNet
+    def __init__(self, ckp_path: str = "google/vit-base-patch16-224", # ImageNet
                  pad_size: int = 224,
                  top_k: int = 5, save_examples: bool = False, use_thr: bool = False, score_thr: float = 20.0,
                  score_perc_thr: float = 0.35, device: str = 'cpu', features_size = 512):
         self.device = device
-        try:
-            self.extractor = AutoFeatureExtractor.from_pretrained(ckp_path)
-        except:
-            self.extractor = AutoImageProcessor.from_pretrained(ckp_path)
-        self.model = AutoModel.from_pretrained(ckp_path).to(self.device)
-        self.dataset_with_embeddings = None
+        self.extractor = AutoFeatureExtractor.from_pretrained(ckp_path)
+        self.model = AutoModel.from_pretrained(ckp_path, output_attentions=True).to(self.device)
         self.top_k = top_k
         self.use_thr = use_thr
         self.score_thr = score_thr
         self.score_perc_thr = score_perc_thr
         self.save_examples = save_examples
-
-        self.linear_layer = nn.Linear(in_features=768, out_features=features_size).to(self.device)  # Puoi cambiare il numero di output
-        #self.subsampling_layer = nn.AdaptiveAvgPool2d((1, 1)).to(self.device)  # Puoi cambiare la dimensione di subsampling
-
-        # Combinare il modello Vision Transformer con il nuovo strato lineare e di subsampling
-        self.relu = nn.LeakyReLU(negative_slope=0.01)
+        #self.linear_layer = nn.Linear(in_features=768, out_features=features_size).to(self.device)
+        #self.relu = nn.LeakyReLU(negative_slope=0.01)
         self.pad_size = pad_size
-
-
-    def extract_embeddings(self, x: NDArray) -> NDArray:
-        x = _pad_data([x], self.pad_size)
-        image_pp = self.extractor(x, return_tensors="pt").to(self.device)
-        features = self.model(**image_pp)
-        #embedding = self.linear_layer(features.last_hidden_state[:, 0])
-        #embedding = self.relu(embedding)
-        return features.last_hidden_state[:, 0].squeeze().tolist()
-        #features = self.model(**image_pp)
-        #embedding = self.linear_layer(features.last_hidden_state[:, 0, :])
-        #embedding = self.subsampling_layer(embedding.unsqueeze(2).unsqueeze(3)).squeeze()
-        #return embedding
 
     def extract_embeddings_old(self, x: Union[NDArray, Image.Image]) -> NDArray:
         
@@ -60,6 +39,37 @@ class ImageSimilarityModel(object):
         image_pp = self.extractor(x, return_tensors="pt").to(self.device)
         features = self.model(**image_pp).last_hidden_state[:, 0].detach().cpu().numpy()
         return features.squeeze()
+    
+    def extract_embeddings(self, x: NDArray) -> NDArray:
+        x = _pad_data([x], self.pad_size)
+        image_pp = self.extractor(x, return_tensors="pt").to(self.device)
+        features = self.model(**image_pp)
+
+        return features.last_hidden_state[:, 0].squeeze().tolist()
+
+    def extractEmbeddings(self, x: NDArray, mainToken: bool = True) -> List[List[float]]:
+        x = _pad_data([x], self.pad_size)
+        image_pp = self.extractor(x, return_tensors="pt").to(self.device)
+        features = self.model(**image_pp)
+        if mainToken:
+            embeddings = features.last_hidden_state.squeeze().cpu()
+        else:
+            embeddings = features.last_hidden_state[:, 0].squeeze()
+  
+        patch_embeddings = embeddings.tolist()
+        
+        return patch_embeddings
+        
+    def extract_features_and_attentions(self, x: NDArray) -> NDArray:
+        x = self.extractor(images=x, return_tensors="pt").to(self.device)
+        outputs = self.model(**x, output_attentions=True)
+        attentions = outputs.attentions
+        f = outputs.last_hidden_state[:, 0]
+        print(attentions)
+        print("Attentions", attentions[0].shape)
+        print("Features", f.shape)
+
+        return attentions
 
 def _pad_data(imgs: Sequence[NDArray], pad_size: int) -> NDArray:
     new_images = []
@@ -249,4 +259,90 @@ class GraphClassifier(nn.Module):
         x = torch.relu(x)
         x = self.conv2(x, edge_index)
         print("x",x.shape)
+        return x
+    
+
+class GCN_graph3(torch.nn.Module):
+    def __init__(self, in_channels, hidden_dim=16, output_dim=25):
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.conv1 = GCNConv(in_channels, hidden_dim)
+        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        self.conv3 = GCNConv(hidden_dim, hidden_dim)
+        self.lin1 = Linear(hidden_dim, output_dim)
+        self.batch_norm1 = LayerNorm(hidden_dim, mode='node')
+        self.batch_norm2 = LayerNorm(hidden_dim, mode='node')
+        self.batch_norm3 = LayerNorm(hidden_dim, mode='node')
+
+    def forward(self, x, edge_index):
+        #print(x.shape)
+        x = F.relu(self.batch_norm1(self.conv1(x, edge_index)))
+        #print(x.shape)
+        x = F.relu(self.batch_norm2(self.conv2(x, edge_index)))
+        #print(x.shape)
+        x = F.relu(self.batch_norm3(self.conv3(x, edge_index)))
+        #print("X before", x.shape) # (Size Node, Size Features)
+        x = torch.mean(x, dim=0)
+        #print("X after", x.shape) # (Size Features)
+        x = self.lin1(x)
+        #print(x.shape)
+        return x
+    
+class GCN_graph_nodeClassification(torch.nn.Module):
+    def __init__(self, in_channels, hidden_dim=16, output_dim=25):
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.conv1 = GCNConv(in_channels, hidden_dim)
+        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        #self.conv3 = GCNConv(hidden_dim, hidden_dim)
+        self.lin1 = Linear(hidden_dim, output_dim)
+        self.batch_norm1 = LayerNorm(hidden_dim, mode='node')
+        self.batch_norm2 = LayerNorm(hidden_dim, mode='node')
+        #self.batch_norm3 = LayerNorm(hidden_dim, mode='node')
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        x = F.relu(self.batch_norm1(self.conv1(x, edge_index)))
+        #print(x.shape)
+        x = F.relu(self.batch_norm2(self.conv2(x, edge_index)))
+        #print(x.shape)
+        #x = F.relu(self.batch_norm3(self.conv3(x, edge_index)))
+        #print("X before", x.shape) # (Size Node, Size Features)
+        
+        #print("X after", x.shape) # (Size Features)
+        x = self.lin1(x)
+
+        x = F.log_softmax(x, dim=1)
+        #print(x.shape)
+        return x
+    
+class GCN_graph_nodeClassification2(torch.nn.Module):
+    def __init__(self, in_channels, hidden_dim=16, output_dim=25):
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.conv1 = GCNConv(in_channels, hidden_dim)
+        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        #self.conv3 = GCNConv(hidden_dim, hidden_dim)
+        self.lin1 = Linear(hidden_dim, output_dim)
+        self.batch_norm1 = LayerNorm(hidden_dim, mode='node')
+        self.batch_norm2 = LayerNorm(hidden_dim, mode='node')
+        #self.batch_norm3 = LayerNorm(hidden_dim, mode='node')
+
+    def forward(self,  x, edge_index):
+        #x, edge_index = data.x, data.edge_index
+        x = F.relu(self.batch_norm1(self.conv1(x, edge_index)))
+        #print(x.shape)
+        x = F.relu(self.batch_norm2(self.conv2(x, edge_index)))
+        #print(x.shape)
+        #x = F.relu(self.batch_norm3(self.conv3(x, edge_index)))
+        #print("X before", x.shape) # (Size Node, Size Features)
+        
+        #print("X after", x.shape) # (Size Features)
+        x = self.lin1(x)
+
+        x = F.log_softmax(x, dim=1)
+        #print(x.shape)
         return x
