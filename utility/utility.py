@@ -5,7 +5,29 @@ import shutil
 import random
 import glob 
 import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw, ImageFont
 
+litter_classes = ['bottle','can','fish_net','paper','ropes', 'trash', 'vehicle_tyre']
+litter_classes_background = ['background','bottle','can','fish_net','paper','ropes', 'trash', 'vehicle_tyre']
+classes_background = [
+    "background", "person", "bicycle", "car", "motorcycle", "airplane",
+    "bus", "train", "truck", "boat", "traffic light",
+    "fire hydrant", "stop sign", "parking meter", "bench",
+    "bird", "cat", "dog", "horse", "sheep",
+    "cow", "elephant", "bear", "zebra", "giraffe",
+    "backpack", "umbrella", "handbag", "tie", "suitcase",
+    "frisbee", "skis", "snowboard", "sports ball", "kite",
+    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "bottle", "wine glass", "cup", "fork", "knife",
+    "spoon", "bowl", "banana", "apple", "sandwich",
+    "orange", "broccoli", "carrot", "hot dog", "pizza",
+    "donut", "cake", "chair", "couch", "potted plant",
+    "bed", "dining table", "toilet", "tv", "laptop",
+    "mouse", "remote", "keyboard", "cell phone", "microwave",
+    "oven", "toaster", "sink", "refrigerator", "book",
+    "clock", "vase", "scissors", "teddy bear", "hair drier",
+    "toothbrush"
+]
 classes = [
     "person", "bicycle", "car", "motorcycle", "airplane",
     "bus", "train", "truck", "boat", "traffic light",
@@ -252,16 +274,18 @@ def heatmapROIimage(image, segments, roi_array, idx, title):
         heatmap += mask
 
     # Applica la mappa dei colori alla heatmap
-    heatmap = cv2.applyColorMap(heatmap.astype(np.uint8), cv2.COLORMAP_JET)
+    heatmap = cv2.applyColorMap(heatmap.astype(np.uint8), cv2.COLORMAP_COOL)
 
     # Sovrapponi la heatmap sull'immagine originale
     overlay = cv2.addWeighted(image, 0.5, heatmap, 0.7, 0)
 
     # Visualizza l'immagine con la heatmap
     plt.figure(figsize=(8, 8))
-    plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
-    plt.title(title + " Heatmap sovrapposta alle Region of Interest")
-    plt.savefig(str(idx) + '_'+title+'.png', bbox_inches='tight')
+    plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB), cmap='cool')
+    plt.title(title + " feature heatmaps")
+    cbar = plt.colorbar(label='Score (Blue - Red)', ticks=np.linspace(0, 1, num=6))
+
+    plt.savefig('40features/' + str(idx) + '_'+title+'.png', bbox_inches='tight')
     plt.axis('off')
 
 import networkx as nx
@@ -326,7 +350,7 @@ def drawGraph(A, name):
 import torch
 import pandas as pd
 
-def getFeaturesNode(node_mask, feature_len):
+def getFeaturesInformations(node_mask, feature_len):
     
     if node_mask is None:
         raise ValueError(f"The attribute 'node_mask' is not available ")
@@ -336,7 +360,13 @@ def getFeaturesNode(node_mask, feature_len):
                             f"(got shape {node_mask.size()})")
 
 
-    feat_labels = range(node_mask.size(1))
+    mean_node = torch.mean(node_mask, dim=1)
+    dev_std = torch.std(node_mask, dim=1)
+    var_node = torch.var(node_mask, dim=1)
+    print("Mean:",mean_node)
+    print("DevStd:", dev_std)
+    print("Variance", var_node)
+    return
 
     score = node_mask.sum(dim=0)
     labels = feat_labels
@@ -350,8 +380,72 @@ def getFeaturesNode(node_mask, feature_len):
     for i in range(0, len(score), feature_len):
         mean_10 = sum(score[i:i+feature_len]) / float(feature_len)
         features_mean.append(mean_10)
+    if feature_len != 768:
+        return features_mean[0], features_mean[1], features_mean[2], features_mean[3]
+    else:
+        return features_mean[0]
+    
+def getFeatures40(node_mask):
+    step = 10
+    if node_mask is None:
+        raise ValueError(f"The attribute 'node_mask' is not available ")
+    if node_mask.dim() != 2 or node_mask.size(1) <= 1:
+        raise ValueError(f"Cannot compute feature importance for "
+                            f"object-level 'node_mask' "
+                            f"(got shape {node_mask.size()})")
 
-    return features_mean[0], features_mean[1], features_mean[2], features_mean[3]
+    gradient = []
+    intensity = []
+    color = []
+    texture = []
+    
+    for node in node_mask:
+
+        gradient_mean = sum(node[0:9]) / float(step)
+        intensity_mean = sum(node[10:19]) / float(step)
+        color_mean = sum(node[20:29]) / float(step)
+        texture_mean = sum(node[30:39]) / float(step)
+
+        gradient.append(round(gradient_mean.item(), 4))
+        intensity.append(round(intensity_mean.item(), 4))
+        color.append(round(color_mean.item(), 4))
+        texture.append(round(texture_mean.item(), 4))
+
+    return gradient, intensity, color, texture
+
+    
+def getFeaturesNode(node_mask, feature_len):
+    step = 10
+    if node_mask is None:
+        raise ValueError(f"The attribute 'node_mask' is not available ")
+    if node_mask.dim() != 2 or node_mask.size(1) <= 1:
+        raise ValueError(f"Cannot compute feature importance for "
+                            f"object-level 'node_mask' "
+                            f"(got shape {node_mask.size()})")
+
+    feat_labels = range(node_mask.size(1))
+    print("node_mask", node_mask.shape)
+    score = node_mask.sum(dim=0)
+    print("sum", score.shape)
+    labels = feat_labels
+    if len(labels) != score.numel():
+        raise ValueError(f"The number of labels (got {len(labels)}) must "
+                         f"match the number of scores (got {score.numel()})")
+
+    score = score.cpu().numpy()
+
+    idx = 0
+    features_mean = []
+    print("LEN SOCRE", len(score))
+    for i in range(0, len(score), step):
+        mean_10 = sum(score[i:i+step]) / float(step)
+        print(mean_10)
+        features_mean.append(mean_10)
+
+    if feature_len != 768:
+        return features_mean[0], features_mean[1], features_mean[2], features_mean[3]
+    else:
+        return features_mean[0], score
 
 def coco2yolo(b_box, image_w, image_h):
 
@@ -430,3 +524,58 @@ def fillEmptySlots(rois, n_clusters):
         rois = rois[:n_clusters]
     
     return rois
+
+def resizeImage(frame, larghezza_massima=800, altezza_massima=600):
+
+    # Controlla le dimensioni dell'immagine
+    altezza, larghezza, _ = frame.shape
+
+    # Verifica se le dimensioni superano il massimo consentito
+    if larghezza > larghezza_massima or altezza > altezza_massima:
+        # Calcola i nuovi valori di dimensione rispettando il rapporto d'aspetto
+        rapporto_aspetto = larghezza / altezza
+        nuova_larghezza = larghezza_massima
+        nuova_altezza = int(larghezza_massima / rapporto_aspetto)
+
+        # Rimpicciolisci l'immagine
+        frame = cv2.resize(frame, (nuova_larghezza, nuova_altezza))
+
+    return frame
+
+def drawPatches(image, imagePath, original_size = 224, patch_size = 16):
+    # Ottieni le dimensioni dell'immagine
+    height, width, _ = image.shape
+
+    # Calcola il fattore di scala tra la dimensione originale e quella di destinazione
+    scale_x = width / original_size
+    scale_y = height / original_size
+
+    # Calcola il numero di patch per lato nell'immagine originale
+    num_patches = original_size // patch_size
+    patch_num = 0
+
+    for i in range(num_patches):
+        for j in range(num_patches):
+            # Coordinate top-left e bottom-right della patch nell'immagine originale
+            top_left_x_orig = j * patch_size
+            top_left_y_orig = i * patch_size
+            bottom_right_x_orig = (j + 1) * patch_size
+            bottom_right_y_orig = (i + 1) * patch_size
+            
+            # Scala le coordinate per l'immagine di destinazione
+            top_left_x = int(top_left_x_orig * scale_x)
+            top_left_y = int(top_left_y_orig * scale_y)
+            bottom_right_x = int(bottom_right_x_orig * scale_x)
+            bottom_right_y = int(bottom_right_y_orig * scale_y)
+
+            # Disegna il rettangolo della patch
+            cv2.rectangle(image, (top_left_x, top_left_y), (bottom_right_x, bottom_right_y), (0, 0, 255), 1)
+
+            # Numerazione della patch
+            text_position = (top_left_x + 2, top_left_y + 12)
+            cv2.putText(image, str(patch_num), text_position, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1, cv2.LINE_AA)
+
+            patch_num += 1
+
+    cv2.imwrite(imagePath, image)
+    
